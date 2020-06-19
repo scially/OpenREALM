@@ -27,18 +27,17 @@
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
-#include <opencv2/xphoto.hpp>
-#include <opencv2/ximgproc.hpp>
+#include <opencv2/photo.hpp>
 
 #include <realm_stages/stage_base.h>
 #include <realm_stages/stage_settings.h>
-#include "conversions.h"
+#include <realm_stages/conversions.h>
 #include <realm_io/cv_export.h>
-#include <realm_cv/stereo.h>
-#include <realm_types/cv_grid_map.h>
-#include <realm_types/frame.h>
-#include <realm_densifier/densifier_factory.h>
-#include <realm_densifier/sparse_depth.h>
+#include <realm_core/stereo.h>
+#include <realm_core/cv_grid_map.h>
+#include <realm_core/frame.h>
+#include <realm_densifier_base/densifier_factory.h>
+#include <realm_densifier_base/sparse_depth.h>
 
 namespace realm
 {
@@ -84,7 +83,7 @@ class Densification : public StageBase
      * @param stage_set Stage settings for general processing of the densification
      * @param densifier_set Densifier framework settings
      */
-    Densification(const StageSettings::Ptr &stage_set, const DensifierSettings::Ptr &densifier_set);
+    Densification(const StageSettings::Ptr &stage_set, const DensifierSettings::Ptr &densifier_set, double rate);
 
     /*!
      * @brief Function to add frames to the densification stage. Will be moved to the specific buffer depending on the
@@ -129,13 +128,13 @@ class Densification : public StageBase
     uint64_t _rcvd_frames;
 
     //! Current frame in class wide processing
-    Frame::Ptr _frame_curr;
+    Frame::Ptr _frame_current;
 
     //! Minimum depth of the current observed scene
-    float _depth_min_curr;
+    float _depth_min_current;
 
     //! Maximum depth of the current observed scene
-    float _depth_max_curr;
+    float _depth_max_current;
 
     //! Buffer for frames that are only sparsely densified
     FrameBuffer _buffer_no_reco;

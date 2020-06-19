@@ -18,36 +18,38 @@
 * along with OpenREALM. If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <realm_core/loguru.h>
+
 #include <realm_stages/mosaicing.h>
 
 using namespace realm;
 using namespace stages;
 
-Mosaicing::Mosaicing(const StageSettings::Ptr &stage_set)
-    : StageBase("mosaicing", stage_set->get<std::string>("path_output"), stage_set->get<int>("queue_size")),
+Mosaicing::Mosaicing(const StageSettings::Ptr &stage_set, double rate)
+    : StageBase("mosaicing", (*stage_set)["path_output"].toString(), rate, (*stage_set)["queue_size"].toInt()),
       _utm_reference(nullptr),
       _publish_mesh_nth_iter(0),
-      _publish_mesh_every_nth_kf(stage_set->get<int>("publish_mesh_every_nth_kf")),
-      _do_publish_mesh_at_finish(stage_set->get<int>("publish_mesh_at_finish") > 0),
-      _downsample_publish_mesh(stage_set->get<double>("downsample_publish_mesh")),
+      _publish_mesh_every_nth_kf((*stage_set)["publish_mesh_every_nth_kf"].toInt()),
+      _do_publish_mesh_at_finish((*stage_set)["publish_mesh_at_finish"].toInt() > 0),
+      _downsample_publish_mesh((*stage_set)["downsample_publish_mesh"].toDouble()),
       _use_surface_normals(true),
-      _th_elevation_min_nobs(stage_set->get<int>("th_elevation_min_nobs")),
-      _th_elevation_var((float)stage_set->get<double>("th_elevation_variance")),
-      _settings_save({stage_set->get<int>("save_valid") > 0,
-                      stage_set->get<int>("save_ortho_rgb_one") > 0,
-                      stage_set->get<int>("save_ortho_rgb_all") > 0,
-                      stage_set->get<int>("save_ortho_gtiff_one") > 0,
-                      stage_set->get<int>("save_ortho_gtiff_all") > 0,
-                      stage_set->get<int>("save_elevation_one") > 0,
-                      stage_set->get<int>("save_elevation_all") > 0,
-                      stage_set->get<int>("save_elevation_var_one") > 0,
-                      stage_set->get<int>("save_elevation_var_all") > 0,
-                      stage_set->get<int>("save_elevation_obs_angle_one") > 0,
-                      stage_set->get<int>("save_elevation_obs_angle_all") > 0,
-                      stage_set->get<int>("save_elevation_mesh_one") > 0,
-                      stage_set->get<int>("save_num_obs_one") > 0,
-                      stage_set->get<int>("save_num_obs_all") > 0,
-                      stage_set->get<int>("save_dense_ply") > 0})
+      _th_elevation_min_nobs((*stage_set)["th_elevation_min_nobs"].toInt()),
+      _th_elevation_var((*stage_set)["th_elevation_variance"].toFloat()),
+      _settings_save({(*stage_set)["save_valid"].toInt() > 0,
+                      (*stage_set)["save_ortho_rgb_one"].toInt() > 0,
+                      (*stage_set)["save_ortho_rgb_all"].toInt() > 0,
+                      (*stage_set)["save_ortho_gtiff_one"].toInt() > 0,
+                      (*stage_set)["save_ortho_gtiff_all"].toInt() > 0,
+                      (*stage_set)["save_elevation_one"].toInt() > 0,
+                      (*stage_set)["save_elevation_all"].toInt() > 0,
+                      (*stage_set)["save_elevation_var_one"].toInt() > 0,
+                      (*stage_set)["save_elevation_var_all"].toInt() > 0,
+                      (*stage_set)["save_elevation_obs_angle_one"].toInt() > 0,
+                      (*stage_set)["save_elevation_obs_angle_all"].toInt() > 0,
+                      (*stage_set)["save_elevation_mesh_one"].toInt() > 0,
+                      (*stage_set)["save_num_obs_one"].toInt() > 0,
+                      (*stage_set)["save_num_obs_all"].toInt() > 0,
+                      (*stage_set)["save_dense_ply"].toInt() > 0})
 {
   std::cout << "Stage [" << _stage_name << "]: Created Stage with Settings: " << std::endl;
   stage_set->print();
@@ -55,6 +57,9 @@ Mosaicing::Mosaicing(const StageSettings::Ptr &stage_set)
 
 void Mosaicing::addFrame(const Frame::Ptr &frame)
 {
+  // First update statistics about incoming frame rate
+  updateFpsStatisticsIncoming();
+
   if (frame->getObservedMap()->empty())
   {
     LOG_F(INFO, "Input frame missing observed map. Dropping!");
@@ -79,7 +84,7 @@ bool Mosaicing::process()
     Frame::Ptr frame = getNewFrame();
     CvGridMap::Ptr observed_map = frame->getObservedMap();
 
-    LOG_F(INFO, "Processing frame #%llu...", frame->getFrameId());
+    LOG_F(INFO, "Processing frame #%u...", frame->getFrameId());
 
     // Use surface normals only if setting was set to true AND actual data has normals
     _use_surface_normals = (_use_surface_normals && observed_map->exists("elevation_normal"));
@@ -90,8 +95,8 @@ bool Mosaicing::process()
     {
       LOG_F(INFO, "Initializing global map...");
       _global_map = observed_map;
-      (*_global_map).add("elevation_var", cv::Mat::ones(_global_map->size(), CV_32F)*consts::getNoValue<float>());
-      (*_global_map).add("elevation_hyp", cv::Mat::ones(_global_map->size(), CV_32F)*consts::getNoValue<float>());
+      (*_global_map).add("elevation_var", cv::Mat(_global_map->size(), CV_32F, std::numeric_limits<float>::quiet_NaN()));
+      (*_global_map).add("elevation_hyp", cv::Mat(_global_map->size(), CV_32F, std::numeric_limits<float>::quiet_NaN()));
 
       // Incremental update is equal to global map on initialization
       map_update = _global_map;
@@ -111,13 +116,14 @@ bool Mosaicing::process()
         LOG_F(INFO, "Overlap detected. Add with blending...");
         CvGridMap overlap_blended = blend(&overlap);
         (*_global_map).add(overlap_blended, REALM_OVERWRITE_ALL, false);
+
         cv::Rect2d roi = overlap_blended.roi();
         LOG_F(INFO, "Overlap region: [%4.2f, %4.2f] [%4.2f x %4.2f]", roi.x, roi.y, roi.width, roi.height);
         LOG_F(INFO, "Overlap area: %6.2f", roi.area());
       }
 
       LOG_F(INFO, "Extracting updated map...");
-      map_update = std::make_shared<CvGridMap>(_global_map->getSubmap({"color_rgb", "elevation", "valid"}, observed_map->roi()));
+      map_update = std::make_shared<CvGridMap>(_global_map->getSubmap({"color_rgb", "elevation", "valid"}, overlap.first->roi()));
     }
 
     // Publishings every iteration
@@ -230,7 +236,7 @@ void Mosaicing::updateGridElement(const GridQuickAccess::Ptr &ref, const GridQui
   // Compute std deviation of elevation hypothesis WITH input elevation. Check then if below threshold.
   // If yes OR hypothesis is better than set elevation, switch hypothesis and elevation, update std deviation
   // If no, go on
-  if (*ref->hyp > consts::getNoValue<float>())
+  if (!std::isnan(*ref->hyp))
   {
     float variance_hyp = ((*inp->ele)-(*ref->hyp))*((*inp->ele)-(*ref->hyp)) / 2.0f;
     if (variance_hyp < _th_elevation_var || variance_hyp < variance_new)
@@ -438,8 +444,8 @@ std::vector<Face> Mosaicing::createMeshFaces(const CvGridMap::Ptr &map)
     // After resizing through bilinear interpolation there can occure bad elevation values at the border
     cv::Mat mask_low = ((*mesh_sampled)["elevation"] < ele_min);
     cv::Mat mask_high = ((*mesh_sampled)["elevation"] > ele_max);
-    (*mesh_sampled)["elevation"].setTo(consts::getNoValue<float>(), mask_low);
-    (*mesh_sampled)["elevation"].setTo(consts::getNoValue<float>(), mask_high);
+    (*mesh_sampled)["elevation"].setTo(std::numeric_limits<float>::quiet_NaN(), mask_low);
+    (*mesh_sampled)["elevation"].setTo(std::numeric_limits<float>::quiet_NaN(), mask_high);
     (*mesh_sampled)["valid"].setTo(0, mask_low);
     (*mesh_sampled)["valid"].setTo(0, mask_high);
   }
@@ -457,6 +463,9 @@ std::vector<Face> Mosaicing::createMeshFaces(const CvGridMap::Ptr &map)
 
 void Mosaicing::publish(const Frame::Ptr &frame, const CvGridMap::Ptr &map, const CvGridMap::Ptr &update, uint64_t timestamp)
 {
+  // First update statistics about outgoing frame rate
+  updateFpsStatisticsOutgoing();
+
   _transport_img((*_global_map)["color_rgb"], "output/rgb");
   _transport_img(analysis::convertToColorMapFromCVFC1((*_global_map)["elevation"],
                                                       (*_global_map)["valid"],

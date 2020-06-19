@@ -23,9 +23,9 @@
 
 #include <exiv2/exiv2.hpp>
 
-#include <realm_gis/conversions.h>
-#include <realm_types/frame.h>
-#include <realm_types/wgs84.h>
+#include <realm_core/conversions.h>
+#include <realm_core/frame.h>
+#include <realm_core/wgs84.h>
 #include "gis_export.h"
 #include <realm_io/utilities.h>
 
@@ -33,6 +33,13 @@ namespace realm
 {
 namespace io
 {
+
+// Exiv2 changed the image pointer definition in version 0.27 and higher
+#if EXIV2_MINOR_VERSION >= 27
+  using Exiv2ImagePointer = Exiv2::Image::UniquePtr;
+#else
+  using Exiv2ImagePointer = Exiv2::Image::AutoPtr;
+#endif
 
 class Exiv2FrameReader
 {
@@ -109,7 +116,7 @@ class Exiv2FrameReader
      * @param filepath Path to the image with exif tags
      * @return Basic Frame for REALM framework, Pose must be set outside
      */
-     Frame::Ptr loadFrameFromExiv2(const std::string &camera_id, const camera::Pinhole &cam, const std::string &filepath);
+     Frame::Ptr loadFrameFromExiv2(const std::string &camera_id, const camera::Pinhole::Ptr &cam, const std::string &filepath);
 
     /*!
      * @brief Reading GNSS informations from exif tags. There are several formats out there, main format is lat/lon in

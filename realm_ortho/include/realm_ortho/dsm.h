@@ -22,13 +22,14 @@
 #define PROJECT_DSM_H
 
 #include <memory>
+#include <numeric>
 
 #include <eigen3/Eigen/Eigen>
 #include <opencv2/core.hpp>
 
-#include <realm_types/enums.h>
-#include <realm_types/cv_grid_map.h>
-#include <realm_maths/plane_fitter.h>
+#include <realm_core/enums.h>
+#include <realm_core/cv_grid_map.h>
+#include <realm_core/plane_fitter.h>
 #include <realm_ortho/nanoflann.h>
 #include <realm_ortho/nearest_neighbor.h>
 
@@ -58,8 +59,10 @@ class DigitalSurfaceModel
     /*!
      * @brief Constructor for planar surfaces, no prior surface information exists
      * @param roi Region of interest of the observed surface, usually utm coordinates and width/height in [m]
+     * @param elevation A fixed elevation can be set. This is especially useful, if the altitude of  the UAV is not measured
+     * above ground.
      */
-    explicit DigitalSurfaceModel(const cv::Rect2d &roi);
+    explicit DigitalSurfaceModel(const cv::Rect2d &roi, double elevation = 0.0);
 
     /*!
      * @brief Constructor for elevated surfaces, prior informations about the surface must have been computed.

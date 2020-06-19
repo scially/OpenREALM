@@ -18,19 +18,21 @@
 * along with OpenREALM. If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <realm_core/loguru.h>
+
 #include <realm_stages/ortho_rectification.h>
 
 using namespace realm;
 using namespace stages;
 
-OrthoRectification::OrthoRectification(const StageSettings::Ptr &stage_set)
-    : StageBase("ortho_rectification", stage_set->get<std::string>("path_output"), stage_set->get<int>("queue_size")),
-      _GSD(stage_set->get<double>("GSD")),
-      _settings_save({stage_set->get<int>("save_valid") > 0,
-                      stage_set->get<int>("save_ortho_rgb") > 0,
-                      stage_set->get<int>("save_ortho_gtiff") > 0,
-                      stage_set->get<int>("save_elevation") > 0,
-                      stage_set->get<int>("save_elevation_angle") > 0})
+OrthoRectification::OrthoRectification(const StageSettings::Ptr &stage_set, double rate)
+    : StageBase("ortho_rectification", (*stage_set)["path_output"].toString(), rate, (*stage_set)["queue_size"].toInt()),
+      _GSD((*stage_set)["GSD"].toDouble()),
+      _settings_save({(*stage_set)["save_valid"].toInt() > 0,
+                  (*stage_set)["save_ortho_rgb"].toInt() > 0,
+                  (*stage_set)["save_ortho_gtiff"].toInt() > 0,
+                  (*stage_set)["save_elevation"].toInt() > 0,
+                  (*stage_set)["save_elevation_angle"].toInt() > 0})
 {
   std::cout << "Stage [" << _stage_name << "]: Created Stage with Settings: " << std::endl;
   stage_set->print();
@@ -38,6 +40,9 @@ OrthoRectification::OrthoRectification(const StageSettings::Ptr &stage_set)
 
 void OrthoRectification::addFrame(const Frame::Ptr &frame)
 {
+  // First update statistics about incoming frame rate
+  updateFpsStatisticsIncoming();
+
   if (!frame->hasObservedMap())
   {
     LOG_F(INFO, "Input frame has no surface informations. Dropping...");
@@ -61,7 +66,7 @@ bool OrthoRectification::process()
   if (!_buffer.empty())
   {
     Frame::Ptr frame = getNewFrame();
-    LOG_F(INFO, "Processing frame #%llu...", frame->getFrameId());
+    LOG_F(INFO, "Processing frame #%u...", frame->getFrameId());
 
     CvGridMap::Ptr observed_map = frame->getObservedMap();
 
@@ -82,8 +87,8 @@ bool OrthoRectification::process()
     // After resizing through bilinear interpolation there can occure bad elevation values at the border
     cv::Mat mask_low = ((*observed_map)["elevation"] < ele_min);
     cv::Mat mask_high = ((*observed_map)["elevation"] > ele_max);
-    (*observed_map)["elevation"].setTo(consts::getNoValue<float>(), mask_low);
-    (*observed_map)["elevation"].setTo(consts::getNoValue<float>(), mask_high);
+    (*observed_map)["elevation"].setTo(std::numeric_limits<float>::quiet_NaN(), mask_low);
+    (*observed_map)["elevation"].setTo(std::numeric_limits<float>::quiet_NaN(), mask_high);
     (*observed_map)["valid"].setTo(0, mask_low);
     (*observed_map)["valid"].setTo(0, mask_high);
 
@@ -91,7 +96,7 @@ bool OrthoRectification::process()
     // Output, therefore the new additional data is written into rectified map
     CvGridMap map_rect;
     ortho::rectify(frame, map_rect);
-    observed_map->add(map_rect);
+    observed_map->add(map_rect, REALM_OVERWRITE_ALL, false);
 
     // Transport results
     publish(frame);
@@ -125,6 +130,9 @@ void OrthoRectification::saveIter(const CvGridMap& map, uint8_t zone, uint32_t i
 
 void OrthoRectification::publish(const Frame::Ptr &frame)
 {
+  // First update statistics about outgoing frame rate
+  updateFpsStatisticsOutgoing();
+
   _transport_frame(frame, "output/frame");
   _transport_img((*frame->getObservedMap())["color_rgb"], "output/rectified");
 

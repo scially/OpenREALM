@@ -20,6 +20,8 @@
 
 #include <realm_io/exif_import.h>
 
+#include <realm_core/loguru.h>
+
 namespace realm
 {
 
@@ -28,9 +30,9 @@ io::Exiv2FrameReader::Exiv2FrameReader(const FrameTags &tags)
 {
 }
 
-Frame::Ptr io::Exiv2FrameReader::loadFrameFromExiv2(const std::string &camera_id, const camera::Pinhole &cam, const std::string &filepath)
+Frame::Ptr io::Exiv2FrameReader::loadFrameFromExiv2(const std::string &camera_id, const camera::Pinhole::Ptr &cam, const std::string &filepath)
 {
-  Exiv2::Image::AutoPtr exif_img = Exiv2::ImageFactory::open(filepath);
+  Exiv2ImagePointer exif_img = Exiv2::ImageFactory::open(filepath);
   if (exif_img.get())
   {
     // Read exif and xmp metadata
@@ -38,10 +40,10 @@ Frame::Ptr io::Exiv2FrameReader::loadFrameFromExiv2(const std::string &camera_id
     Exiv2::ExifData &exif_data = exif_img->exifData();
     Exiv2::XmpData &xmp_data = exif_img->xmpData();
     if (exif_data.empty())
-      throw(std::invalid_argument("Error loading Exiv2 frame from filepath '" + filepath + "'."));
+      LOG_F(WARNING, "No exif tags found. Setting default data...");
 
     // Read image data
-    cv::Mat img = cv::imread(filepath, CV_LOAD_IMAGE_COLOR);
+    cv::Mat img = cv::imread(filepath, cv::IMREAD_COLOR);
 
     /*========== MUST HAVE KEYS ==========*/
     uint32_t frame_id = io::extractFrameIdFromFilepath(filepath);
@@ -73,21 +75,48 @@ Frame::Ptr io::Exiv2FrameReader::loadFrameFromExiv2(const std::string &camera_id
 WGSPose io::Exiv2FrameReader::readGNSSExifTag(Exiv2::ExifData &exif_data)
 {
   WGSPose wgs{0.0};
-  wgs.altitude = exif_data[_frame_tags.altitude].toFloat();
+
+  if (exif_data.findKey(Exiv2::ExifKey(_frame_tags.altitude)) != exif_data.end())
+  {
+    wgs.altitude = exif_data[_frame_tags.altitude].toFloat();
+  }
+  else
+  {
+    LOG_F(WARNING, "No exif tag with key '%s' found. Setting data zero.", _frame_tags.altitude.c_str());
+    wgs.altitude = 0.0;
+  }
 
   // Latitude in degree/minute/sec
   double latitude_dms[3];
-  latitude_dms[0] = exif_data[_frame_tags.latitude].toFloat(0);
-  latitude_dms[1] = exif_data[_frame_tags.latitude].toFloat(1);
-  latitude_dms[2] = exif_data[_frame_tags.latitude].toFloat(2);
-  wgs.latitude = cvtAngleDegMinSecToDecimal(latitude_dms);
+
+  if (exif_data.findKey(Exiv2::ExifKey(_frame_tags.latitude)) != exif_data.end())
+  {
+    latitude_dms[0] = exif_data[_frame_tags.latitude].toFloat(0);
+    latitude_dms[1] = exif_data[_frame_tags.latitude].toFloat(1);
+    latitude_dms[2] = exif_data[_frame_tags.latitude].toFloat(2);
+    wgs.latitude = cvtAngleDegMinSecToDecimal(latitude_dms);
+  }
+  else
+  {
+    LOG_F(WARNING, "No exif tag with key '%s' found. Setting data zero.", _frame_tags.latitude.c_str());
+    wgs.latitude = 0.0;
+  }
 
   // Longitude
   double longitude_dms[3];
-  longitude_dms[0] = exif_data[_frame_tags.longitude].toFloat(0);
-  longitude_dms[1] = exif_data[_frame_tags.longitude].toFloat(1);
-  longitude_dms[2] = exif_data[_frame_tags.longitude].toFloat(2);
-  wgs.longitude = cvtAngleDegMinSecToDecimal(longitude_dms);
+
+  if (exif_data.findKey(Exiv2::ExifKey(_frame_tags.longitude)) != exif_data.end())
+  {
+    longitude_dms[0] = exif_data[_frame_tags.longitude].toFloat(0);
+    longitude_dms[1] = exif_data[_frame_tags.longitude].toFloat(1);
+    longitude_dms[2] = exif_data[_frame_tags.longitude].toFloat(2);
+    wgs.longitude = cvtAngleDegMinSecToDecimal(longitude_dms);
+  }
+  else
+  {
+    LOG_F(WARNING, "No exif tag with key '%s' found. Setting data zero.", _frame_tags.longitude.c_str());
+    wgs.longitude = 0.0;
+  }
 
   return wgs;
 }

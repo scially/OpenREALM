@@ -25,9 +25,11 @@ using namespace realm;
 Exiv2GrabberNode::Exiv2GrabberNode()
 : _do_set_all_keyframes(false),
   _use_apriori_pose(false),
+  _use_apriori_georeference(false),
   _use_apriori_surface_pts(false),
   _fps(0.0),
-  _id_curr_file(0)
+  _id_curr_file(0),
+  _cam(nullptr)
 {
   readParams();
   setPaths();
@@ -36,9 +38,9 @@ Exiv2GrabberNode::Exiv2GrabberNode()
 
   // Loading camera from provided file, check first if absolute path was provided
   if (io::fileExists(_file_settings_camera))
-    _cam = io::loadCameraFromYaml(_file_settings_camera);
+    _cam = std::make_shared<camera::Pinhole>(io::loadCameraFromYaml(_file_settings_camera));
   else
-    _cam = io::loadCameraFromYaml(_path_profile + "/camera/", _file_settings_camera);
+    _cam = std::make_shared<camera::Pinhole>(io::loadCameraFromYaml(_path_profile + "/camera/", _file_settings_camera));
   _cam_msg = to_ros::pinhole(_cam);
 
   // Loading poses from file if provided
@@ -46,6 +48,13 @@ Exiv2GrabberNode::Exiv2GrabberNode()
   {
     _poses = io::loadTrajectoryFromTxtTUM(_filepath_poses);
     ROS_INFO_STREAM("Succesfully loaded " << _poses.size() << " external poses.");
+  }
+
+  // Loading georeference from file if provided
+  if (_use_apriori_georeference)
+  {
+    _georeference = io::loadGeoreferenceFromYaml(_filepath_georeference);
+    ROS_INFO_STREAM("Succesfully loaded external georeference:\n" << _georeference);
   }
 
   // Loading surface points from file if provided
@@ -57,14 +66,14 @@ Exiv2GrabberNode::Exiv2GrabberNode()
 
   ROS_INFO_STREAM(
       "Exiv2 Grabber Node [Ankommen]: Successfully loaded camera: "
-          << "\n\tcx = " << _cam.cx()
-          << "\n\tcy = " << _cam.cy()
-          << "\n\tfx = " << _cam.fx()
-          << "\n\tfy = " << _cam.fy()
-          << "\n\tk1 = " << _cam.k1()
-          << "\n\tk2 = " << _cam.k2()
-          << "\n\tp1 = " << _cam.p1()
-          << "\n\tp2 = " << _cam.p2());
+          << "\n\tcx = " << _cam->cx()
+          << "\n\tcy = " << _cam->cy()
+          << "\n\tfx = " << _cam->fx()
+          << "\n\tfy = " << _cam->fy()
+          << "\n\tk1 = " << _cam->k1()
+          << "\n\tk2 = " << _cam->k2()
+          << "\n\tp1 = " << _cam->p1()
+          << "\n\tp2 = " << _cam->p2());
 
   // ROS related inits
   _topic_prefix = "/realm/" + _id_node;
@@ -84,6 +93,7 @@ void Exiv2GrabberNode::readParams()
   param_nh.param("config/rate", _fps, 0.0);
   param_nh.param("config/profile", _profile, std::string("uninitialised"));
   param_nh.param("config/opt/poses", _filepath_poses, std::string("uninitialised"));
+  param_nh.param("config/opt/georeference", _filepath_georeference, std::string("uninitialised"));
   param_nh.param("config/opt/surface_pts", _filepath_surface_pts, std::string("uninitialised"));
   param_nh.param("config/opt/set_all_keyframes", _do_set_all_keyframes, false);
 
@@ -91,6 +101,8 @@ void Exiv2GrabberNode::readParams()
     throw(std::invalid_argument("Error reading exiv2 grabber parameters: Frame rate is too low!"));
   if (_filepath_poses != "uninitialised")
     _use_apriori_pose = true;
+  if (_filepath_georeference != "uninitialised")
+    _use_apriori_georeference = true;
   if (_filepath_surface_pts != "uninitialised")
     _use_apriori_surface_pts = true;
 }
@@ -125,6 +137,11 @@ void Exiv2GrabberNode::spin()
       frame->setVisualPose(pose);
       if (_do_set_all_keyframes)
         frame->setKeyframe(true);
+    }
+
+    if (_use_apriori_georeference)
+    {
+      frame->updateGeoreference(_georeference);
     }
 
     // External surface points can be provided

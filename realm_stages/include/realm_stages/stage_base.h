@@ -30,10 +30,11 @@
 
 #include <opencv2/core.hpp>
 
-#include <realm_types/frame.h>
-#include <realm_types/structs.h>
-#include <realm_types/worker_thread_base.h>
-#include <realm_types/settings_base.h>
+#include <realm_core/frame.h>
+#include <realm_core/timer.h>
+#include <realm_core/structs.h>
+#include <realm_core/worker_thread_base.h>
+#include <realm_core/settings_base.h>
 
 namespace realm
 {
@@ -69,7 +70,7 @@ class StageBase : public WorkerThreadBase
      * @param name Name of the stage, should be set by derived stage
      * @param path Path to the input/output folder for stage informations
      */
-    StageBase(const std::string &name, const std::string &path, int queue_size);
+    StageBase(const std::string &name, const std::string &path, double rate, int queue_size);
 
     /*!
      * @brief Communication thread of the stage will receive data from the previous stage and feed it into the
@@ -168,6 +169,16 @@ class StageBase : public WorkerThreadBase
     bool _is_output_dir_initialized;
 
     /*!
+     * @brief The counter are used to compute the incoming and outgoing frame frequency. They will be evaluated and
+     * reseted by the timer every X seconds.
+     */
+    uint32_t _counter_frames_in;
+    uint32_t _counter_frames_out;
+    uint32_t _t_statistics_period; // [seconds]
+    Timer::Ptr _timer_statistics_fps;
+    std::mutex _mutex_statistics_fps;
+
+    /*!
      * @brief Queue size of the added frames. Usually implemented as ringbuffer / fifo
      */
     int _queue_size;
@@ -230,6 +241,28 @@ class StageBase : public WorkerThreadBase
      * "initStagePath" was triggered.
      */
     virtual void initStageCallback() = 0;
+
+    /*!
+     * @brief Setter for the statistics evaluation period.
+     * @param s Period of time in seconds
+     */
+    void setStatisticsPeriod(uint32_t s);
+
+    /*!
+     * @brief Update function to be called by the derived class to update the incoming frame rate statistic.
+     */
+    void updateFpsStatisticsIncoming();
+
+    /*!
+     * @brief Update function to be called by the derived class to update the outgoing frame rate statistic.
+     */
+    void updateFpsStatisticsOutgoing();
+
+    /*
+     * brief Gets triggered by _timer_statistics_fps every X seconds to read the incoming and outgoing number of frame
+     * counters.
+     */
+    void evaluateFpsStatistic();
 };
 
 } // namespace realm

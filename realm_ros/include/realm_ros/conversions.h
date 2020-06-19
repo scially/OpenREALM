@@ -33,13 +33,13 @@
 #include <geodesy/utm.h>
 #include <pcl_ros/point_cloud.h>
 
-#include <realm_types/enums.h>
-#include <realm_types/frame.h>
-#include <realm_types/utm32.h>
-#include <realm_types/structs.h>
-#include <realm_types/camera.h>
-#include <realm_types/cv_grid_map.h>
-#include <realm_cv/analysis.h>
+#include <realm_core/enums.h>
+#include <realm_core/frame.h>
+#include <realm_core/utm32.h>
+#include <realm_core/structs.h>
+#include <realm_core/camera.h>
+#include <realm_core/cv_grid_map.h>
+#include <realm_core/analysis.h>
 
 #include <std_msgs/Float32.h>
 #include <std_msgs/ColorRGBA.h>
@@ -149,7 +149,7 @@ sensor_msgs::PointCloud2 pointCloud(const std_msgs::Header &header, const cv::Ma
  * @param cam Pinhole camera model in realm type
  * @return ROS message pinhole camera
  */
-realm_msgs::Pinhole pinhole(const realm::camera::Pinhole &cam);
+realm_msgs::Pinhole pinhole(const realm::camera::Pinhole::ConstPtr &cam);
 
 /*!
  * @brief Converter for a georeferenced image to a ROS type ground image. The latter is used in RVIZ by ground image
@@ -257,7 +257,7 @@ Frame::Ptr frame(const realm_msgs::Frame &msg);
  * @param msg ROS pinhole message
  * @return REALM camera pinhole type
  */
-camera::Pinhole pinhole(const realm_msgs::Pinhole &msg);
+camera::Pinhole::Ptr pinhole(const realm_msgs::Pinhole &msg);
 
 /*!
  * @brief Converter for ROS pose message to opencv/REALM pose type.

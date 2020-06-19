@@ -39,45 +39,23 @@ but at the moment I won't recommend to use it on any other.
 - Polished, ready-to-use code for commercial applications. It is research code that has developed over a long 
   time and is therefore sometimes ugly and buggy as hell. But I am working on it :)
 
-## Dependencies
+## Prerequisites
 
-Linux (tested with Ubuntu 16.04)
 
-ROS Kinetic with OpenCV 3.3.1
+| OS         | ROS Distribution | Build Status |
+|:----------:|:----------------:|:------------:|
+|Ubuntu 16.04| ROS Kinetic      | [![Build Status](https://travis-ci.org/laxnpander/OpenREALM.svg?branch=master)](https://travis-ci.org/laxnpander/OpenREALM) |
+|Ubuntu 18.04| ROS Melodic      | [![Build Status](https://travis-ci.org/laxnpander/OpenREALM.svg?branch=master)](https://travis-ci.org/laxnpander/OpenREALM) |
 
--> Refer to http://wiki.ros.org/kinetic/Installation
+For ROS installation please refer to: http://wiki.ros.org/
 
-Pangolin for ORB SLAM 2
-
--> https://github.com/stevenlovegrove/Pangolin
-
-QT5 for RVIZ plugin
-
--> Refer to http://doc.qt.io/qt-5/qt5-intro.html
-
-Exiv2 installation from source for image reading and writing with meta infos
-
--> https://github.com/Exiv2/exiv2
-
+Other dependencies are installed using the  ```install_deps.sh``` script:
 ```sh
-# Catkin tools for build process
-sudo apt-get install python-catkin-tools
-
-# Eigen3 for several linear algebra problems
-sudo apt-get install libeigen3-dev
-
-# Gdal library for conversions between UTM and WGS84
-sudo apt-get install gdal-bin
-
-# Cgal library for delauney 2.5D triangulation and mesh creation
-sudo apt-get install libcgal-dev
-sudo apt-get install libcgal-qt5-dev
-
-# PCL for writing point clouds and mesh data
-sudo add-apt-repository ppa:v-launchpad-jochen-sprickerhof-de/pcl
-sudo apt-get update
-sudo apt-get install libpcl-all
+chmod u+x install_deps.sh
+./install_deps.sh
 ```
+Do not proceed to the next step before 
+you executed this script.
 
 ## Optional Dependencies
 
@@ -85,9 +63,18 @@ CUDA for stereo reconstruction with plane sweep lib
 
 -> Refer to https://developer.nvidia.com/cuda-downloads?target_os=Linux
 
+Please note, that installing CUDA can sometimes be troublesome. If you are facing an error like 
+```sh
+*fatal error: cuda_runtime.h: No such file or directory*
+```
+often times adding the CUDA directory to the .bashrc does the trick. If you use CUDA 9.0 for example, you should 
+```sh
+echo 'export CPATH=/usr/local/cuda-9.0/include:$CPATH' >> ~/.bashrc 
+```
+
 ## Installation
 
-Linux (tested with Ubuntu 16.04)
+Linux (both Ubuntu 16.04 and 18.04)
 
 ```sh
 # Create and init a catkin workspace
@@ -160,6 +147,28 @@ roslaunch realm_ros alexa_noreco.launch
 roslaunch realm_ros alexa_reco.launch
 ```
   
+## Docker 
+OpenREALM can also be used with a docker. The docker is based on Ubuntu 18.04 and all files related to it
+are in the ```docker``` folder of this main repository. Testing it is very simple:
+
+1.Install Docker from 
+
+  [Docker Install](https://docs.docker.com/engine/install/)
+
+2.Build the Docker image using the script in ```docker``` folder.
+```bash
+  /bin/bash docker_build.sh
+```
+
+3.Run the Docker image using the script in ```docker``` folder.
+```bash
+  /bin/bash docker_run.sh
+```
+This script can be run from any folder in the host system. The Working Directory will be
+mounted in the docker. The dataset should ideally be kept in this same folder. Then change
+the path of the dataset in the launch file as described previously and run the test.
+
+
 ## References
 
 **Visual SLAM**

@@ -64,6 +64,11 @@ class Exiv2GrabberNode
     std::string _filepath_poses;
     std::unordered_map<uint64_t, cv::Mat> _poses;
 
+    // External georeference can be provided in YAML format
+    bool _use_apriori_georeference;
+    std::string _filepath_georeference;
+    cv::Mat _georeference;
+
     // External surface points can be provided in simple txt format with x, y, z
     bool _use_apriori_surface_pts;
     std::string _filepath_surface_pts;
@@ -88,7 +93,7 @@ class Exiv2GrabberNode
     ros::Publisher _pub_frame;
     ros::Publisher _pub_image;
 
-    camera::Pinhole _cam;
+    camera::Pinhole::Ptr _cam;
     realm_msgs::Pinhole _cam_msg;
 
     size_t _id_curr_file;

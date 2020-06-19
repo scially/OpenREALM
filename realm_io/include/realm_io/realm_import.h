@@ -24,7 +24,7 @@
 #include <fstream>
 #include <unordered_map>
 
-#include <realm_types/camera_settings_factory.h>
+#include <realm_core/camera_settings_factory.h>
 #include <realm_io/utilities.h>
 
 namespace realm
@@ -44,11 +44,19 @@ camera::Pinhole loadCameraFromYaml(const std::string &directory, const std::stri
 /*!
  * @brief Function for loading camera from .yaml file. For formatted examples see realm_ros/config/...
  *        Interface for filepath one argument
- * @param directory Directory of the file
- * @param filename Name of the file including suffix
+ * @param filepath Absolute path to the file
+ * @param fps Optional parameter if you also want to grab the fps in the loader function
  * @return Loaded camera model
  */
-camera::Pinhole loadCameraFromYaml(const std::string &filepath);
+camera::Pinhole loadCameraFromYaml(const std::string &filepath, double* fps = nullptr);
+
+/*!
+ * @brief Function for loading a georeference from .yaml file. Format is OpenCV YAML standard for matrices. The matrix
+ *        should have dimensions 4x4 with (R | t) and the last row (0 0 0 1).
+ * @param filepath Absolute path to the file
+ * @return Georeference matrix with 4x4 of type CV_64F
+ */
+cv::Mat  loadGeoreferenceFromYaml(const std::string &filepath);
 
 /*!
  * @brief Function for loading trajectory file in TUM format. Is provided es key/value pair with timestamp/3x4 mat.

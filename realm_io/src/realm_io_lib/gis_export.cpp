@@ -60,7 +60,7 @@ void io::saveGeoTIFF(const CvGridMap &map,
   geoproj[0] = roi.x;
   geoproj[1] = GSD;
   geoproj[2] = 0;
-  geoproj[3] = roi.y;
+  geoproj[3] = roi.y+roi.height;
   geoproj[4] = 0;
   geoproj[5] = -GSD;
 
@@ -123,13 +123,13 @@ void io::saveGeoTIFF(const cv::Mat &img,
       throw(std::runtime_error("Error saving GeoTIFF: Unhandled error code."));
 
     if (img.type() == CV_8UC1 || img.type() == CV_8UC2 || img.type() == CV_8UC1 || img.type() == CV_8UC4)
-      band->SetNoDataValue(consts::INT_NO_VALUE);
+      band->SetNoDataValue(0);
     else if (img.type() == CV_16UC1)
-      band->SetNoDataValue(consts::INT_NO_VALUE);
+      band->SetNoDataValue(0);
     else if (img.type() == CV_32F)
-      band->SetNoDataValue(consts::FLOAT_NO_VALUE);
+      band->SetNoDataValue(std::numeric_limits<float>::quiet_NaN());
     else if (img.type() == CV_64F)
-      band->SetNoDataValue(consts::DOUBLE_NO_VALUE);
+      band->SetNoDataValue(std::numeric_limits<double>::quiet_NaN());
 
     if (bands == 1)
       band->SetColorInterpretation(GCI_GrayIndex);

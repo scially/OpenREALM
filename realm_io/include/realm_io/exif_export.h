@@ -26,11 +26,11 @@
 
 #include <exiv2/exiv2.hpp>
 
-#include <realm_types/camera.h>
-#include <realm_types/frame.h>
+#include <realm_core/camera.h>
+#include <realm_core/frame.h>
 #include "gis_export.h"
 #include <realm_io/utilities.h>
-#include <realm_gis/conversions.h>
+#include <realm_core/conversions.h>
 
 namespace realm
 {
@@ -68,7 +68,7 @@ void saveExifImage(const Frame::Ptr &frame,
  */
 void saveExifImage(uint64_t timestamp,
                    const cv::Mat& img,
-                   const camera::Pinhole &cam,
+                   const camera::Pinhole::ConstPtr &cam,
                    const UTMPose &utm_ref,
                    const std::string &camera_id,
                    uint32_t image_id,

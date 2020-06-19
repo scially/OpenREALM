@@ -25,21 +25,22 @@ using namespace stages;
 
 PoseEstimation::PoseEstimation(const StageSettings::Ptr &stage_set,
                                const VisualSlamSettings::Ptr &vslam_set,
-                               const CameraSettings::Ptr &cam_set)
-    : StageBase("pose_estimation", stage_set->get<std::string>("path_output"), stage_set->get<int>("queue_size")),
+                               const CameraSettings::Ptr &cam_set,
+                               double rate)
+    : StageBase("pose_estimation", (*stage_set)["path_output"].toString(), rate, (*stage_set)["queue_size"].toInt()),
       _is_georef_initialized(false),
-      _use_vslam(stage_set->get<int>("use_vslam") > 0),
-      _use_fallback(stage_set->get<int>("use_fallback") > 0),
-      _do_update_georef(stage_set->get<int>("update_georef") > 0),
-      _do_suppress_outdated_pose_pub(stage_set->get<int>("suppress_outdated_pose_pub") > 0),
-      _th_error_georef(stage_set->get<double>("th_error_georef")),
-      _overlap_max(stage_set->get<double>("overlap_max")),
-      _overlap_max_fallback(stage_set->get<double>("overlap_max_fallback")),
-      _settings_save({stage_set->get<int>("save_trajectory_gnss") > 0,
-                      stage_set->get<int>("save_trajectory_visual") > 0,
-                      stage_set->get<int>("save_frames") > 0,
-                      stage_set->get<int>("save_keyframes") > 0,
-                      stage_set->get<int>("save_keyframes_full") > 0})
+      _use_vslam((*stage_set)["use_vslam"].toInt() > 0),
+      _use_fallback((*stage_set)["use_fallback"].toInt() > 0),
+      _do_update_georef((*stage_set)["update_georef"].toInt() > 0),
+      _do_suppress_outdated_pose_pub((*stage_set)["suppress_outdated_pose_pub"].toInt() > 0),
+      _th_error_georef((*stage_set)["th_error_georef"].toDouble()),
+      _overlap_max((*stage_set)["overlap_max"].toDouble()),
+      _overlap_max_fallback((*stage_set)["overlap_max_fallback"].toDouble()),
+      _settings_save({(*stage_set)["save_trajectory_gnss"].toInt() > 0,
+                      (*stage_set)["save_trajectory_visual"].toInt() > 0,
+                      (*stage_set)["save_frames"].toInt() > 0,
+                      (*stage_set)["save_keyframes"].toInt() > 0,
+                      (*stage_set)["save_keyframes_full"].toInt() > 0})
 {
   if (_use_vslam)
   {
@@ -56,11 +57,11 @@ PoseEstimation::PoseEstimation(const StageSettings::Ptr &stage_set,
     _vslam->RegisterUpdateTransport(update_func);
 
     // Create geo reference initializer
-    _georef = std::make_shared<GeometricReferencer>(_th_error_georef);
+    _georeferencer = std::make_shared<GeometricReferencer>(_th_error_georef);
   }
 
   // Create Pose Estimation publisher
-  _stage_publisher.reset(new PoseEstimationIO(this, true));
+  _stage_publisher.reset(new PoseEstimationIO(this, rate, true));
   _stage_publisher->start();
 
   // Creation of reference plane, currently only the one below is supported
@@ -79,6 +80,16 @@ PoseEstimation::~PoseEstimation()
 
 void PoseEstimation::addFrame(const Frame::Ptr &frame)
 {
+  // First update statistics about incoming frame rate
+  updateFpsStatisticsIncoming();
+
+  // The user can provide a-priori georeferencing. Check if this is the case
+  if (!_is_georef_initialized && frame->isGeoreferenced())
+  {
+    LOG_F(INFO, "Detected a-priori georeference for frame %u. Assuming all frames are georeferenced.", frame->getFrameId());
+    _georeferencer = std::make_shared<DummyReferencer>(frame->getGeoreference());
+  }
+
   // Push to buffer for visual tracking
   if (_use_vslam)
     pushToBufferNoPose(frame);
@@ -103,7 +114,7 @@ bool PoseEstimation::process()
 
   // Grab georeference flag once at the beginning, to avoid multithread problems
   if (_use_vslam)
-    _is_georef_initialized = _georef->isInitialized();
+    _is_georef_initialized = _georeferencer->isInitialized();
 
   // Process new frames without a visual pose currently
   if (!_buffer_no_pose.empty())
@@ -111,7 +122,7 @@ bool PoseEstimation::process()
     // Grab frame from buffer with no poses
     Frame::Ptr frame = getNewFrameTracking();
 
-    LOG_F(INFO, "Processing frame #%i with timestamp %llu!", frame->getFrameId(), frame->getTimestamp());
+    LOG_F(INFO, "Processing frame #%i with timestamp %lu!", frame->getFrameId(), frame->getTimestamp());
 
     // Track current frame -> compute visual accurate pose
     track(frame);
@@ -119,9 +130,9 @@ bool PoseEstimation::process()
     // Identify buffer for push
     if (frame->hasAccuratePose() && _is_georef_initialized)
     {
-      if (_do_update_georef && !_georef->isBuisy())
+      if (_do_update_georef && !_georeferencer->isBuisy())
       {
-        std::thread t(std::bind(&GeospatialReferencerIF::update, _georef, std::make_shared<Frame>(*frame)));
+        std::thread t(std::bind(&GeospatialReferencerIF::update, _georeferencer, frame));
         t.detach();
       }
       pushToBufferAll(frame);
@@ -137,12 +148,14 @@ bool PoseEstimation::process()
   }
 
   // Handles georeference initialization and georeferencing of frame poses
-  if (_use_vslam)
+  // but only starts, if a new frame was processed during this loop
+  if (_use_vslam && has_processed)
   {
-    if (!_is_georef_initialized && !_buffer_pose_init.empty() && !_georef->isBuisy())
+    if (!_is_georef_initialized && !_buffer_pose_init.empty() && !_georeferencer->isBuisy())
     {
       // Branch: Georef is not calculated yet
-      std::thread t(std::bind(&GeospatialReferencerIF::init, _georef, _buffer_pose_init));
+      LOG_F(INFO, "Size of init buffer: %lu", _buffer_pose_init.size());
+      std::thread t(std::bind(&GeospatialReferencerIF::init, _georeferencer, _buffer_pose_init));
       t.detach();
       has_processed = true;
     }
@@ -227,7 +240,7 @@ void PoseEstimation::reset()
 
   // Reset georeferencing
   if (_use_vslam)
-    _georef.reset(new GeometricReferencer(_th_error_georef));
+    _georeferencer.reset(new GeometricReferencer(_th_error_georef));
   _stage_publisher->requestReset();
   _is_georef_initialized = false;
   _reset_requested = false;
@@ -235,10 +248,10 @@ void PoseEstimation::reset()
 
 bool PoseEstimation::changeParam(const std::string& name, const std::string &val)
 {
-  std::unique_lock<std::mutex> lock();
+  std::unique_lock<std::mutex> lock;
   if (name == "use_vslam")
   {
-    _use_vslam = (val == "true" || val == "1" ? true : false);
+    _use_vslam = (val == "true" || val == "1");
     return true;
   }
   return false;
@@ -372,9 +385,7 @@ double PoseEstimation::estimatePercOverlap(const Frame::Ptr &frame)
 
 cv::Rect2d PoseEstimation::estimateProjectedRoi(const Frame::Ptr &frame)
 {
-  camera::Pinhole cam = frame->getCamera();
-  cam.setPose(frame->getPose());
-  return cam.projectImageBoundsToPlaneRoi(_plane_ref.pt, _plane_ref.n);
+  return frame->getCamera()->projectImageBoundsToPlaneRoi(_plane_ref.pt, _plane_ref.n);
 }
 
 Frame::Ptr PoseEstimation::getNewFrameTracking()
@@ -404,13 +415,13 @@ void PoseEstimation::applyGeoreferenceToBuffer()
     _mutex_buffer_pose_all.unlock();
 
     _mutex_t_w2g.lock();
-    _T_w2g = _georef->getTransformation();
+    _T_w2g = _georeferencer->getTransformation();
     _mutex_t_w2g.unlock();
 
     // But check first, if frame has actually a visually estimated pose information
     // In case of default GNSS pose generated from lat/lon/alt/heading, pose is already in world frame
     if (frame->hasAccuratePose())
-      frame->applyGeoreference(_T_w2g);
+      frame->initGeoreference(_T_w2g);
     pushToBufferPublish(frame);
   }
 }
@@ -418,18 +429,16 @@ void PoseEstimation::applyGeoreferenceToBuffer()
 void PoseEstimation::printGeoReferenceInfo(const Frame::Ptr &frame)
 {
   UTMPose utm = frame->getGnssUtm();
-  camera::Pinhole cam = frame->getCamera();
-  cam.setPose(frame->getPose());
-  cv::Mat t = cam.t();
+  cv::Mat t = frame->getCamera()->t();
 
   LOG_F(INFO, "Georeferenced pose:");
   LOG_F(INFO, "GNSS: [%10.2f, %10.2f, %4.2f]", utm.easting, utm.northing, utm.altitude);
-  LOG_F(INFO, "GNSS: [%10.2f, %10.2f, %4.2f]", t.at<double>(0), t.at<double>(1), t.at<double>(2));
+  LOG_F(INFO, "Visual: [%10.2f, %10.2f, %4.2f]", t.at<double>(0), t.at<double>(1), t.at<double>(2));
   LOG_F(INFO, "Diff: [%10.2f, %10.2f, %4.2f]", utm.easting-t.at<double>(0), utm.northing-t.at<double>(1), utm.altitude-t.at<double>(2));
 }
 
-PoseEstimationIO::PoseEstimationIO(PoseEstimation* stage, bool do_delay_keyframes)
-    : WorkerThreadBase("Publisher [pose_estimation]", true),
+PoseEstimationIO::PoseEstimationIO(PoseEstimation* stage, double rate, bool do_delay_keyframes)
+    : WorkerThreadBase("Publisher [pose_estimation]", static_cast<int64_t>(1/rate*1000.0), true),
       _is_time_ref_set(false),
       _is_new_output_path_set(false),
       _do_delay_keyframes(do_delay_keyframes),
@@ -502,7 +511,7 @@ void PoseEstimationIO::reset()
 
 void PoseEstimationIO::publishPose(const Frame::Ptr &frame)
 {
-  LOG_F(INFO, "Publishing pose of frame #%llu...", frame->getFrameId());
+  LOG_F(INFO, "Publishing pose of frame #%u...", frame->getFrameId());
 
   // Save trajectories
   if (_stage_handle->_settings_save.save_trajectory_gnss || _stage_handle->_settings_save.save_trajectory_visual)
@@ -526,11 +535,14 @@ void PoseEstimationIO::publishSurfacePoints(const Frame::Ptr &frame)
 
 void PoseEstimationIO::publishFrame(const Frame::Ptr &frame)
 {
+  // First update statistics about outgoing frame rate
+  _stage_handle->updateFpsStatisticsOutgoing();
+
   // Two situation can occure, when publishing a frame is triggered
   // 1) Frame is marked as keyframe by the SLAM -> publish directly
   // 2) Frame is not marked as keyframe -> mostly in GNSS only situations.
-  LOG_IF_F(INFO, frame->isKeyframe(), "Publishing keyframe #%llu...", frame->getFrameId());
-  LOG_IF_F(INFO, !frame->isKeyframe(), "Publishing frame #%llu...", frame->getFrameId());
+  LOG_IF_F(INFO, frame->isKeyframe(), "Publishing keyframe #%u...", frame->getFrameId());
+  LOG_IF_F(INFO, !frame->isKeyframe(), "Publishing frame #%u...", frame->getFrameId());
 
   publishSurfacePoints(frame);
 
@@ -569,7 +581,7 @@ void PoseEstimationIO::scheduleFrame(const Frame::Ptr &frame)
 
   // Time until schedule
   long t_remain = ((long)dt) - (getCurrentTimeMilliseconds()-_t_ref.first);
-  LOG_F(INFO, "Scheduled publish frame #%llu in %4.2fs", frame->getFrameId(), (double)t_remain/1000);
+  LOG_F(INFO, "Scheduled publish frame #%u in %4.2fs", frame->getFrameId(), (double)t_remain/1000);
 }
 
 void PoseEstimationIO::publishScheduled()

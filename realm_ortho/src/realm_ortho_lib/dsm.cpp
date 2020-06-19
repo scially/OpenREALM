@@ -20,9 +20,11 @@
 
 #include <realm_ortho/dsm.h>
 
+#include <opencv2/imgproc.hpp>
+
 using namespace realm;
 
-DigitalSurfaceModel::DigitalSurfaceModel(const cv::Rect2d &roi)
+DigitalSurfaceModel::DigitalSurfaceModel(const cv::Rect2d &roi, double elevation)
 : _is_initialized(false),
   _use_prior_normals(false),
   _assumption(SurfaceAssumption::PLANAR),
@@ -34,7 +36,7 @@ DigitalSurfaceModel::DigitalSurfaceModel(const cv::Rect2d &roi)
   // Resolution is assumed to be 1.0m as default
   _surface = std::make_shared<CvGridMap>();
   _surface->setGeometry(roi, 1.0);
-  _surface->add("elevation", cv::Mat::zeros(_surface->size(), CV_32FC1));
+  _surface->add("elevation", cv::Mat::ones(_surface->size(), CV_32FC1)*elevation);
   _surface->add("valid", cv::Mat::ones(_surface->size(), CV_8UC1)*255);
   _is_initialized = true;
 }
@@ -188,7 +190,7 @@ void DigitalSurfaceModel::computeElevation(const cv::Mat &point_cloud)
   cv::Size2i size = _surface->size();
 
   // Essential layers / must have
-  cv::Mat elevation = cv::Mat::ones(size, CV_32FC1)*consts::getNoValue<float>();
+  cv::Mat elevation = cv::Mat(size, CV_32FC1, std::numeric_limits<float>::quiet_NaN());
   cv::Mat valid = cv::Mat::zeros(size, CV_8UC1);
 
   // Optional computation according to flag

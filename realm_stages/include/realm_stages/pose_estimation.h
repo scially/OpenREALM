@@ -25,14 +25,15 @@
 
 #include <realm_stages/stage_base.h>
 #include <realm_stages/stage_settings.h>
-#include <realm_types/frame.h>
-#include <realm_types/camera_settings.h>
-#include <realm_types/structs.h>
+#include <realm_core/frame.h>
+#include <realm_core/camera_settings.h>
+#include <realm_core/structs.h>
 #include <realm_io/cv_export.h>
 #include <realm_io/realm_export.h>
 #include <realm_io/exif_export.h>
-#include <realm_vslam/geometric_referencer.h>
-#include <realm_vslam/visual_slam_factory.h>
+#include <realm_vslam_base/dummy_referencer.h>
+#include <realm_vslam_base/geometric_referencer.h>
+#include <realm_vslam_base/visual_slam_factory.h>
 
 namespace realm
 {
@@ -60,7 +61,8 @@ class PoseEstimation : public StageBase
   public:
     PoseEstimation(const StageSettings::Ptr &stage_set,
                    const VisualSlamSettings::Ptr &vslam_set,
-                   const CameraSettings::Ptr &cam_set);
+                   const CameraSettings::Ptr &cam_set,
+                   double rate);
     ~PoseEstimation();
     void addFrame(const Frame::Ptr &frame) override;
     bool process() override;
@@ -125,7 +127,7 @@ class PoseEstimation : public StageBase
     std::unique_ptr<PoseEstimationIO> _stage_publisher;
 
     // Georeferencing initializer
-    GeospatialReferencerIF::Ptr _georef;
+    GeospatialReferencerIF::Ptr _georeferencer;
 
     void track(Frame::Ptr &frame);
 
@@ -156,7 +158,7 @@ class PoseEstimationIO : public WorkerThreadBase
     using TimeReference = std::pair<long, uint64_t>;
     using Task = std::pair<long, Frame::Ptr>;
   public:
-    PoseEstimationIO(PoseEstimation* stage, bool do_delay_keyframes);
+    PoseEstimationIO(PoseEstimation* stage, double rate, bool do_delay_keyframes);
     bool process() override;
     void setOutputPath(const std::string &path);
     void initLog(const std::string &filepath);

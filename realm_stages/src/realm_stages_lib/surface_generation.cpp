@@ -18,25 +18,32 @@
 * along with OpenREALM. If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <realm_core/loguru.h>
+
 #include <realm_stages/surface_generation.h>
 
 using namespace realm;
 using namespace stages;
 
-SurfaceGeneration::SurfaceGeneration(const StageSettings::Ptr &stage_set)
-: StageBase("surface_generation", stage_set->get<std::string>("path_output"), stage_set->get<int>("queue_size")),
-  _try_use_elevation(stage_set->get<int>("try_use_elevation") > 0),
-  _knn_radius_factor(stage_set->get<double>("knn_radius_factor")),
-  _mode_surface_normals(static_cast<DigitalSurfaceModel::SurfaceNormalMode>(stage_set->get<int>("mode_surface_normals"))),
+SurfaceGeneration::SurfaceGeneration(const StageSettings::Ptr &settings, double rate)
+: StageBase("surface_generation", (*settings)["path_output"].toString(), rate, (*settings)["queue_size"].toInt()),
+  _try_use_elevation((*settings)["try_use_elevation"].toInt() > 0),
+  _knn_radius_factor((*settings)["knn_radius_factor"].toDouble()),
+  _is_projection_plane_offset_computed(false),
+  _projection_plane_offset(0.0),
+  _mode_surface_normals(static_cast<DigitalSurfaceModel::SurfaceNormalMode>((*settings)["mode_surface_normals"].toInt())),
   _plane_reference(Plane{(cv::Mat_<double>(3, 1) << 0.0, 0.0, 0.0), (cv::Mat_<double>(3, 1) << 0.0, 0.0, 1.0)}),
-  _settings_save({stage_set->get<int>("save_valid") > 0,
-                  stage_set->get<int>("save_elevation") > 0,
-                  stage_set->get<int>("save_normals") > 0})
+  _settings_save({(*settings)["save_valid"].toInt() > 0,
+                  (*settings)["save_elevation"].toInt() > 0,
+                  (*settings)["save_normals"].toInt() > 0})
 {
 }
 
 void SurfaceGeneration::addFrame(const Frame::Ptr &frame)
 {
+  // First update statistics about incoming frame rate
+  updateFpsStatisticsIncoming();
+
   std::unique_lock<std::mutex> lock(_mutex_buffer);
   _buffer.push_back(frame);
   // Ringbuffer implementation
@@ -50,7 +57,7 @@ bool SurfaceGeneration::process()
   if (!_buffer.empty())
   {
     Frame::Ptr frame = getNewFrame();
-    LOG_F(INFO, "Processing frame #%llu...", frame->getFrameId());
+    LOG_F(INFO, "Processing frame #%u...", frame->getFrameId());
 
     // Identify surface assumption for input frame and compute DSM
     DigitalSurfaceModel::Ptr dsm;
@@ -102,11 +109,14 @@ bool SurfaceGeneration::changeParam(const std::string& name, const std::string &
 
 void SurfaceGeneration::reset()
 {
-
+  _projection_plane_offset = 0.0;
+  _is_projection_plane_offset_computed = false;
 }
 
 void SurfaceGeneration::publish(const Frame::Ptr &frame)
 {
+  // First update statistics about outgoing frame rate
+  updateFpsStatisticsOutgoing();
   _transport_frame(frame, "output/frame");
 }
 
@@ -171,18 +181,50 @@ SurfaceAssumption SurfaceGeneration::computeSurfaceAssumption(const Frame::Ptr &
   return SurfaceAssumption::PLANAR;
 }
 
+double SurfaceGeneration::computeProjectionPlaneOffset(const Frame::Ptr &frame)
+{
+  double offset = 0.0;
+
+  // If scene depth is computed, there is definitely enough sparse points
+  if (frame->isDepthComputed())
+  {
+    std::vector<double> z_coord;
+
+    cv::Mat points = frame->getSurfacePoints();
+    for (int i = 0; i < points.rows; ++i)
+      z_coord.push_back(points.at<double>(i, 2));
+
+    sort(z_coord.begin(), z_coord.end());
+    offset = z_coord[(z_coord.size() - 1) / 2];
+
+    LOG_F(INFO, "Sparse cloud was utilized to compute an initial projection plane at elevation = %4.2f.", offset);
+  }
+  else
+  {
+    LOG_F(INFO, "No sparse cloud set in frame. Assuming the projection plane is at elevation = %4.2f.", offset);
+  }
+
+  return offset;
+}
+
 DigitalSurfaceModel::Ptr SurfaceGeneration::createPlanarSurface(const Frame::Ptr &frame)
 {
+  if (!_is_projection_plane_offset_computed)
+  {
+    _projection_plane_offset = computeProjectionPlaneOffset(frame);
+    _is_projection_plane_offset_computed = true;
+  }
+
   // Create planar surface in world frame
-  cv::Rect2d roi = frame->getCamera().projectImageBoundsToPlaneRoi(_plane_reference.pt, _plane_reference.n);
-  auto dsm = std::make_shared<DigitalSurfaceModel>(roi);
+  cv::Rect2d roi = frame->getCamera()->projectImageBoundsToPlaneRoi(_plane_reference.pt, _plane_reference.n);
+  auto dsm = std::make_shared<DigitalSurfaceModel>(roi, _projection_plane_offset);
   return dsm;
 }
 
 DigitalSurfaceModel::Ptr SurfaceGeneration::createElevationSurface(const Frame::Ptr &frame)
 {
   // Create elevated 2.5D surface in world frame
-  cv::Rect2d roi = frame->getCamera().projectImageBoundsToPlaneRoi(_plane_reference.pt, _plane_reference.n);
+  cv::Rect2d roi = frame->getCamera()->projectImageBoundsToPlaneRoi(_plane_reference.pt, _plane_reference.n);
   auto dsm = std::make_shared<DigitalSurfaceModel>(roi, frame->getSurfacePoints(), _mode_surface_normals, _knn_radius_factor);
   return dsm;
 }

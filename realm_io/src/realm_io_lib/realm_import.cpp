@@ -20,6 +20,8 @@
 
 #include <realm_io/realm_import.h>
 
+#include <eigen3/Eigen/Eigen>
+
 using namespace realm;
 
 camera::Pinhole io::loadCameraFromYaml(const std::string &directory, const std::string &filename)
@@ -27,22 +29,37 @@ camera::Pinhole io::loadCameraFromYaml(const std::string &directory, const std::
   return loadCameraFromYaml(directory + "/" + filename);
 }
 
-camera::Pinhole io::loadCameraFromYaml(const std::string &filepath)
+camera::Pinhole io::loadCameraFromYaml(const std::string &filepath, double* fps)
 {
   // Identify camera model
   CameraSettings::Ptr settings = CameraSettingsFactory::load(filepath);
 
   // Load camera informations depending on model
-  if (settings->get<std::string>("type") == "pinhole")
+  if ((*settings)["type"].toString() == "pinhole")
   {
+    // Grab the fps, as it is note saved in the camera container
+    if (fps != nullptr)
+      *fps = (*settings)["fps"].toDouble();
+
     // Create pinhole model
-    camera::Pinhole cam(settings->get<double>("fx"), settings->get<double>("fy"),
-                        settings->get<double>("cx"), settings->get<double>("cy"),
-                        (uint32_t)settings->get<int>("width"), (uint32_t)settings->get<int>("height"));
-    cam.setDistortionMap(settings->get<double>("k1"), settings->get<double>("k2"),
-                         settings->get<double>("p1"), settings->get<double>("p2"), 0.0);
+    camera::Pinhole cam((*settings)["fx"].toDouble(), (*settings)["fy"].toDouble(),
+                        (*settings)["cx"].toDouble(), (*settings)["cy"].toDouble(),
+              (uint32_t)(*settings)["width"].toInt(), (uint32_t)(*settings)["height"].toInt());
+    cam.setDistortionMap((*settings)["k1"].toDouble(), (*settings)["k2"].toDouble(),
+                         (*settings)["p1"].toDouble(), (*settings)["p2"].toDouble(), (*settings)["k3"].toDouble());
     return cam;
   }
+}
+
+cv::Mat io::loadGeoreferenceFromYaml(const std::string &filepath)
+{
+  cv::Mat georeference;
+
+  cv::FileStorage fs(filepath, cv::FileStorage::READ);
+  fs["transformation_w2g"] >> georeference;
+  fs.release();
+
+  return georeference;
 }
 
 std::unordered_map<uint64_t, cv::Mat> io::loadTrajectoryFromTxtTUM(const std::string &directory,
